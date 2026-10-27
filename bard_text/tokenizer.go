@@ -35,4 +35,36 @@ func (t *Tokenizer) Encode(tok string) (int, bool) {
 }
 
 // id back to token
-func (t *Tokenizer) Decode(id int)
+func (t *Tokenizer) Decode(id int) (string, bool) {
+	if id < 0 || id >= len(t.tokens) {
+		return "", false
+	}
+	return t.tokens[id], true
+}
+
+func (t *Tokenizer) Size() int {
+	return len(t.tokens)
+} // distinc tokens
+
+func (t *Tokenizer) Occurences() int {
+	return t.occurences
+} // tokens , repeated included
+
+func LoadFile(path string) (*Tokenizer, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	tk := NewTokenizer() // create empty tokenizer
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		tk.Add(line)
+	}
+	return tk, sc.Err()
+}

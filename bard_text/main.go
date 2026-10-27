@@ -1,0 +1,28 @@
+package main
+
+import (
+	"fmt"
+	"log"
+)
+
+func main() {
+	tk, err := LoadFile("hamlet_tokens.txt")
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("occurences: ", tk.Occurences())
+	fmt.Println("Vocabulary size:", tk.Size())
+
+	for id := 0; id < tk.Size(); id++ {
+		tok, ok := tk.Decode(id) // id to token
+		if !ok {
+			log.Fatalf("decode failed for id %d", id)
+		}
+		back, ok := tk.Encode(tok) // token to id
+		if !ok || back != id {
+			log.Fatalf("round trip failed for id %d (%q)", id, tok)
+		}
+	}
+	fmt.Println("ok")
+
+}
