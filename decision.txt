@@ -1,0 +1,34 @@
+Chttps://www.gutenberg.org/cache/epub/1524/pg1524.txtleaning & tokenization decisions for hamlet.txt
+================================================
+
+Source file:   hamlet.txt (Project Gutenberg eBook of Hamlet)
+Output file:   hamlet_tokens.txt (original file left untouched)
+
+1. Cleaning scope
+   - Remove Project Gutenberg boilerplate: everything from the
+     "*** START OF THE PROJECT GUTENBERG EBOOK HAMLET ***" marker to the
+     "*** END OF THE PROJECT GUTENBERG EBOOK HAMLET ***" marker
+     (license header, credits, release info, full license footer).
+   - Remove stage directions: all [_ ... _] markers, including inline
+     ones (e.g. [_Aside._]) and multi-line ones.
+   - NOT removed (kept as-is):
+       * front matter inside the markers (title, Contents,
+         Dramatis Personae)
+       * speaker names (e.g. HAMLET.)
+       * line breaks / original verse lineation
+       * punctuation attached to words (e.g. "HAMLET," "question,")
+
+2. Tokenization
+   - Whitespace split: tokens are separated on spaces/newlines only,
+     punctuation stays attached to the word it follows.
+
+3. Casing
+   - Case preserved: "HAMLET" and "Hamlet" remain distinct.
+
+4. Output format
+   - One token per line, plain UTF-8 .txt file.
+
+5. Result
+   - 31,502 tokens total, 7,556 unique.
+
+Source : https://www.gutenberg.org/cache/epub/1524/pg1524.txt
