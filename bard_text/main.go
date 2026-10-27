@@ -31,4 +31,19 @@ func main() {
 	fmt.Println("First 10 IDs:", ids[:10])   // Check these against your file by hand.
 	fmt.Println("ok")
 
+	examples := BuildExamples(ids)
+	fmt.Println("Examples:", len(examples)) // Should be 31500.
+
+	// Confirm every ID is in range, since the largest should be 7555.
+	maxID := 0
+	for _, id := range ids {
+		if id > maxID {
+			maxID = id
+		}
+	}
+	fmt.Println("Max ID:", maxID) // Should be 7555.
+
+	// Print the first few examples as words to check alignment.
+	PrintExamples(tk, examples, 5)
+
 }
