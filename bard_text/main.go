@@ -23,6 +23,12 @@ func main() {
 			log.Fatalf("round trip failed for id %d (%q)", id, tok)
 		}
 	}
+	ids, err := EncodeFile("hamlet_tokens.txt", tk)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("Encoded length:", len(ids)) // Should be 31502.
+	fmt.Println("First 10 IDs:", ids[:10])   // Check these against your file by hand.
 	fmt.Println("ok")
 
 }

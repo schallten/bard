@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"strings"
 )
@@ -49,6 +50,30 @@ func (t *Tokenizer) Size() int {
 func (t *Tokenizer) Occurences() int {
 	return t.occurences
 } // tokens , repeated included
+
+func EncodeFile(path string, tk *Tokenizer) ([]int, error) { /// reads token fiel again and return id for each occurence
+
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	var ids []int
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		id, ok := tk.Encode(line)
+		if !ok {
+			return nil, fmt.Errorf("token not in vocablary: %q", line)
+		}
+		ids = append(ids, id)
+	}
+	return ids, sc.Err()
+}
 
 func LoadFile(path string) (*Tokenizer, error) {
 	f, err := os.Open(path)
