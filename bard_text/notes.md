@@ -39,6 +39,61 @@ Full table: 15,112 words × 7,556 candidates ≈ 114 million numbers
 As 32-bit floats: ≈ 456 MB
 ```
 
+## Implementation (`model.go`)
+
+The latest commit (`3c20718` "softmax") adds the model in Go.
+
+### `Model` struct
+
+```go
+type Model struct {
+	V    int       // vocab size
+	W    []float32 // rows are input features, columns are candidates
+	Bias []float32 // one bias per candidate word , so V values in total
+}
+```
+
+- `W` is a flat array of size `2 * V * V` — treated as a table with `V` columns per row.
+- The first `V` rows correspond to context word 1; the next `V` rows to context word 2.
+- `NewModel(vocabSize, seed)` initializes small random weights (`~N(0, 0.01)`) and zero biases, so an untrained model gives roughly uniform probabilities.
+
+### `Logits(c0, c1)`
+
+Computes a raw score for every candidate word:
+
+```go
+row0 := c0 * m.V
+row1 := (m.V + c1) * m.V
+z[j] = m.Bias[j] + m.W[row0+j] + m.W[row1+j]
+```
+
+### `Softmax(z)`
+
+Converts logits into a probability distribution:
+
+1. Find the max logit and subtract it from every value (numerical stability, prevents overflow).
+2. Exponentiate each result.
+3. Sum the exponentials.
+4. Divide each by the sum.
+
+```go
+func Softmax(z []float32) []float32
+```
+
+### `Forward(c0, c1)`
+
+Combines the two steps:
+
+```go
+func (m *Model) Forward(c0, c1 int) []float32 {
+	return Softmax(m.Logits(c0, c1))
+}
+```
+
+The `main.go` test runs `Forward` on the first example's context (`"THE" "TRAGEDY"`) and prints:
+- `Sum of probabilities:` ≈ 1 (softmax normalization)
+- `P(correct):` ≈ 1/7556 ≈ 0.00013 (random weights → near-uniform)
+
 ## Mermaid Diagram
 
 ```mermaid

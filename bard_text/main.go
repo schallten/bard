@@ -63,4 +63,10 @@ func main() {
 	// Show how much probability the untrained model gives to the correct answer, "OF".
 	fmt.Println("P(correct):", probs[examples[0].Target]) // Around 1/7556 ≈ 0.00013, since weights are random.
 
+	loss := CrossEntropy(probs, examples[0].Target)
+	fmt.Println("Loss:", loss)
+
+	// first run : Loss: 8.935179
+	// next models should decrease
+
 }
