@@ -46,4 +46,21 @@ func main() {
 	// Print the first few examples as words to check alignment.
 	PrintExamples(tk, examples, 5)
 
+	fmt.Println("-------------------------------")
+	// Create a model with one weight per feature-candidate pair and a fixed seed.
+	m := NewModel(tk.Size(), 42)
+
+	// Predict the word after the first training example's context, "THE" "TRAGEDY".
+	probs := m.Forward(examples[0].Context[0], examples[0].Context[1])
+
+	// The probabilities should add up to about 1.
+	var total float32
+	for _, p := range probs { // Add up every probability.
+		total += p
+	}
+	fmt.Println("Sum of probabilities:", total) // Should print a value very close to 1.
+
+	// Show how much probability the untrained model gives to the correct answer, "OF".
+	fmt.Println("P(correct):", probs[examples[0].Target]) // Around 1/7556 ≈ 0.00013, since weights are random.
+
 }
