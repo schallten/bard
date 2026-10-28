@@ -28,7 +28,7 @@ func main() {
 		log.Fatal(err)
 	}
 	fmt.Println("Encoded length:", len(ids)) // Should be 31502.
-	fmt.Println("First 10 IDs:", ids[:10])   // Check these against your file by hand.
+	fmt.Println("First 10 IDs:", ids[:10])
 	fmt.Println("ok")
 
 	examples := BuildExamples(ids)
