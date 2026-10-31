@@ -120,3 +120,132 @@ flowchart TD
     style L fill:#ccffe4
     style M fill:#ccccff
 ```
+
+---
+
+# Training (`train.go`)
+
+A forward pass gives a probability for every candidate word. Training turns
+"how wrong was that?" into "which number do I turn, and by how much?"
+
+## The correction: guess minus truth
+
+For one example, the forward pass gives probabilities `p`. The fix for every
+candidate word `j` is:
+
+```
+correction[j] = p[j] - (1 if j == target else 0)
+```
+
+- Positive → the model gave too much probability to a wrong word → lower its logits.
+- Negative → the correct word got too little → raise its logits.
+- All zeros → the prediction was perfect → nothing to learn from this example.
+
+Read plainly: **"take the share each word got, subtract 1 from the right word."**
+If `hath` got 69% but wasn't the answer, it was 69% too high; if `is` was the
+answer but got 13%, it was 87% too low. The corrections sum to zero, so
+probability is only moved around, never created.
+
+No calculus needed: this *is* the derivative of cross-entropy through softmax
+with respect to the logits, but it can be reached by the "how far is each
+share from where it should be?" argument.
+
+## Where the correction goes
+
+The logit for candidate `j` is built from exactly three parameters:
+
+```
+z[j] = Bias[j] + W[c0][j] + W[V+c1][j]
+```
+
+so the same correction is subtracted from all three:
+
+```go
+m.Bias[j]    -= lr * d
+m.W[row0+j] -= lr * d
+m.W[row1+j] -= lr * d
+```
+
+Only **two rows** of `W` are touched per example. That sparsity is why the
+114M-parameter table is trainable at all.
+
+`Step` measures the loss *before* applying the update and returns it; `Train`
+averages those over an epoch and prints loss and perplexity (`e^loss`).
+
+## Plain-SGD vs mini-batch
+
+`Train` uses one example at a time (SGD). It needs no gradient buffer — the
+alternative is a second 456 MB `dW` slice. The trade-off is a noisier but
+correct update.
+
+## Gradient check
+
+`GradientCheck` computes the analytic correction for one weight and compares it
+to a numeric slope `(L(w+ε) − L(w−ε)) / 2ε`. Run it **after** training — early
+logits are tiny and the numeric side drowns in float32 rounding noise.
+
+---
+
+# Results
+
+Setup: `NewModel(7556, seed=42)`, `lr = 0.1`, 10 epochs, 31,500 examples.
+
+| epoch | loss   | perplexity |
+|-------|--------|------------|
+| 0     | 8.9303 | 7556       |
+| 1     | 7.4104 | 1653.1     |
+| 2     | 6.8152 | 911.6      |
+| 3     | 6.5322 | 686.9      |
+| 4     | 6.2985 | 543.8      |
+| 5     | 6.0892 | 441.1      |
+| 6     | 5.8953 | 363.3      |
+| 7     | 5.7126 | 302.6      |
+| 8     | 5.5386 | 254.3      |
+| 9     | 5.3719 | 215.3      |
+| 10    | 5.2114 | 183.3      |
+
+Loss after the final epoch's updates: **5.0416**. (The epoch number is measured
+before that epoch's updates, so the post-training measurement is slightly lower.)
+
+Gradient check agrees to ~5 digits:
+
+```
+W[0][2]  analytic -0.999539   numeric -0.999522
+W[0][3]  analytic +0.000063   numeric +0.000072
+```
+
+Perplexity fell from **7556** (uniform guessing over the whole vocabulary) to
+**~183** — the model is now choosing among roughly 183 plausible words instead
+of all 7556. It has not gone to 0 because two words of context cannot determine
+every next word in Hamlet; that floor is what a bigger architecture is for.
+
+## Sampling (`gen.go`)
+
+`Sample` divides the logits by `temperature` before softmax, then draws from the
+resulting distribution. `1.0` is the trained model; lower is safer, higher is
+wilder. `Generate` walks the model from a two-word start.
+
+Same seed and start (`"THE" "TRAGEDY"`), 40 new words:
+
+**temperature 0.5** — stays in distribution, repeats common phrases:
+
+```
+THE TRAGEDY and grace to the King. KING. I do you think it be HORATIO. And my lord, I have been The King and a thousand of the King's of his own HORATIO. I am very QUEEN. I have a speech of
+```
+
+**temperature 1.0** — correct word-salad of Hamlet's vocabulary:
+
+```
+THE TRAGEDY She aim'd depart. world But her in your HORATIO. What very hams. to it that would but much well: And but most going suck'd will speak out of made,— makes one the which shall pray'st of father, in done, that
+```
+
+**temperature 1.5** — too hot, vocabulary becomes noise:
+
+```
+THE TRAGEDY carters. dust drives, man's Whilst gall thee again. HORATIO. up, gifts,— corruption, King, Sir, advantage, Since morning Now Dost he Thus health Rosencrantz, sandal hearts delight journeys observant Tomorrow Gertrude, part: Denmark me tediousness hits. Well, white upon sleeps. is't,
+```
+
+Takeaway: the model has learnt *local* trigram statistics (it knows `KING.` and
+`HORATIO.` are speaker labels, that `THE TRAGEDY` comes before a name), but with
+only two words of context it cannot hold a sentence together. That is the
+limitation the next architecture has to solve.

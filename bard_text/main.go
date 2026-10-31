@@ -63,10 +63,16 @@ func main() {
 	// Show how much probability the untrained model gives to the correct answer, "OF".
 	fmt.Println("P(correct):", probs[examples[0].Target]) // Around 1/7556 ≈ 0.00013, since weights are random.
 
-	loss := CrossEntropy(probs, examples[0].Target)
-	fmt.Println("Loss:", loss)
+	fmt.Println("-------------------------------")
+	fmt.Printf("loss before training: %.4f\n", m.AverageLoss(examples))
+	m.Train(examples, 10, 0.1)
+	fmt.Printf("loss after training:  %.4f\n", m.AverageLoss(examples))
 
-	// first run : Loss: 8.935179
-	// next models should decrease
+	GradientCheck(m, examples[0], 1e-2)
 
+	fmt.Println("-------------------------------")
+	start := [2]int{examples[0].Context[0], examples[0].Context[1]}
+	for _, temp := range []float32{0.5, 1.0, 1.5} {
+		fmt.Printf("temperature %.1f:\n%s\n\n", temp, Generate(m, tk, start, 40, temp, 1))
+	}
 }
