@@ -7,89 +7,94 @@ import (
 	"strings"
 )
 
-type Tokenizer struct {
-	toID       map[string]int
-	tokens     []string
-	occurences int
+// Vocabulary maps tokens to IDs and IDs back to tokens.
+type Vocabulary struct {
+	tokenToID       map[string]int
+	idToToken       []string
+	totalTokenCount int
 }
 
-func NewTokenizer() *Tokenizer {
-	return &Tokenizer{toID: make(map[string]int)}
+func NewVocabulary() *Vocabulary {
+	return &Vocabulary{tokenToID: make(map[string]int)}
 }
 
-// records one occurence of a token and returns its ID
-func (t *Tokenizer) Add(tok string) int {
-	t.occurences++
-	// token already exists
-	if id, ok := t.toID[tok]; ok {
-		return id
+// AddTokenAndReturnID records one occurrence of a token and returns its ID.
+func (vocabulary *Vocabulary) AddTokenAndReturnID(token string) int {
+	vocabulary.totalTokenCount++
+	// The token already exists.
+	if existingID, exists := vocabulary.tokenToID[token]; exists {
+		return existingID
 	}
-	id := len(t.tokens) // next free id
-	t.toID[tok] = id
-	t.tokens = append(t.tokens, tok)
-	return id
+	newID := len(vocabulary.idToToken) // The next free ID.
+	vocabulary.tokenToID[token] = newID
+	vocabulary.idToToken = append(vocabulary.idToToken, token)
+	return newID
 }
 
-func (t *Tokenizer) Encode(tok string) (int, bool) {
-	id, ok := t.toID[tok]
-	return id, ok
+// TokenToID returns the ID for a token, and whether it exists.
+func (vocabulary *Vocabulary) TokenToID(token string) (int, bool) {
+	id, exists := vocabulary.tokenToID[token]
+	return id, exists
 }
 
-// id back to token
-func (t *Tokenizer) Decode(id int) (string, bool) {
-	if id < 0 || id >= len(t.tokens) {
+// IDToToken returns the token for an ID, and whether it exists.
+func (vocabulary *Vocabulary) IDToToken(id int) (string, bool) {
+	if id < 0 || id >= len(vocabulary.idToToken) {
 		return "", false
 	}
-	return t.tokens[id], true
+	return vocabulary.idToToken[id], true
 }
 
-func (t *Tokenizer) Size() int {
-	return len(t.tokens)
-} // distinc tokens
+// VocabularySize returns the number of distinct tokens.
+func (vocabulary *Vocabulary) VocabularySize() int {
+	return len(vocabulary.idToToken)
+}
 
-func (t *Tokenizer) Occurences() int {
-	return t.occurences
-} // tokens , repeated included
+// TotalTokenCount returns the number of tokens, repeats included.
+func (vocabulary *Vocabulary) TotalTokenCount() int {
+	return vocabulary.totalTokenCount
+}
 
-func EncodeFile(path string, tk *Tokenizer) ([]int, error) { /// reads token fiel again and return id for each occurence
-
-	f, err := os.Open(path)
+// ReadTokenFileAsIDs reads one token per line and returns the ID of each token.
+func ReadTokenFileAsIDs(filePath string, vocabulary *Vocabulary) ([]int, error) {
+	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer file.Close()
 
-	var ids []int
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
+	var tokenIDs []int
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
 		}
-		id, ok := tk.Encode(line)
-		if !ok {
-			return nil, fmt.Errorf("token not in vocablary: %q", line)
+		tokenID, exists := vocabulary.TokenToID(line)
+		if !exists {
+			return nil, fmt.Errorf("token not in vocabulary: %q", line)
 		}
-		ids = append(ids, id)
+		tokenIDs = append(tokenIDs, tokenID)
 	}
-	return ids, sc.Err()
+	return tokenIDs, scanner.Err()
 }
 
-func LoadFile(path string) (*Tokenizer, error) {
-	f, err := os.Open(path)
+// LoadVocabularyFromFile reads one token per line and builds a vocabulary.
+func LoadVocabularyFromFile(filePath string) (*Vocabulary, error) {
+	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer file.Close()
 
-	tk := NewTokenizer() // create empty tokenizer
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
+	vocabulary := NewVocabulary()
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
 		}
-		tk.Add(line)
+		vocabulary.AddTokenAndReturnID(line)
 	}
-	return tk, sc.Err()
+	return vocabulary, scanner.Err()
 }

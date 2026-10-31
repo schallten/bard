@@ -5,76 +5,87 @@ import (
 	"math"
 )
 
-// Step runs one SGD update for a single example and returns the loss
-// measured before the update.
-func (m *Model) Step(c0, c1, target int, lr float32) float32 {
-	p := m.Forward(c0, c1)
-	loss := CrossEntropy(p, target)
+// LearnFromOneExample updates the model once using a single training example
+// and returns the loss measured before the update.
+func (model *LanguageModel) LearnFromOneExample(firstContextWordID, secondContextWordID, correctNextWordID int, learningRate float32) float32 {
+	predictedProbabilities := model.PredictNextWordProbabilities(firstContextWordID, secondContextWordID)
+	lossForThisExample := ComputeCrossEntropyLoss(predictedProbabilities, correctNextWordID)
 
-	row0 := c0 * m.V
-	row1 := (m.V + c1) * m.V
+	firstContextWordWeightRowStart := firstContextWordID * model.VocabularySize
+	secondContextWordWeightRowStart := (model.VocabularySize + secondContextWordID) * model.VocabularySize
 
-	for j, pj := range p {
-		// correction = guess minus truth, in one line.
-		d := pj
-		if j == target {
-			d -= 1
+	for candidateWordID, predictedProbability := range predictedProbabilities {
+		// The correction is guess minus truth, in one line.
+		correction := predictedProbability
+		if candidateWordID == correctNextWordID {
+			correction -= 1
 		}
-		m.Bias[j] -= lr * d
-		m.W[row0+j] -= lr * d
-		m.W[row1+j] -= lr * d
+		model.Biases[candidateWordID] -= learningRate * correction
+		model.Weights[firstContextWordWeightRowStart+candidateWordID] -= learningRate * correction
+		model.Weights[secondContextWordWeightRowStart+candidateWordID] -= learningRate * correction
 	}
-	return loss
+	return lossForThisExample
 }
 
-// Train sweeps the examples epochs times, reporting average loss per pass.
-func (m *Model) Train(examples []Example, epochs int, lr float32) {
-	for e := 1; e <= epochs; e++ {
-		var total float64
-		for _, ex := range examples {
-			total += float64(m.Step(ex.Context[0], ex.Context[1], ex.Target, lr))
+// TrainModelForEpochs sweeps the training examples and reports train and
+// validation loss after every pass.
+func (model *LanguageModel) TrainModelForEpochs(trainingExamples, validationExamples []TrainingExample, numberOfEpochs int, learningRate float32) {
+	for epochNumber := 1; epochNumber <= numberOfEpochs; epochNumber++ {
+		var sumOfLosses float64
+		for _, example := range trainingExamples {
+			sumOfLosses += float64(model.LearnFromOneExample(
+				example.ContextWordIDs[0], example.ContextWordIDs[1], example.CorrectNextWordID, learningRate))
 		}
-		avg := total / float64(len(examples))
-		fmt.Printf("epoch %2d   loss %.4f   perplexity %.1f\n", e, avg, math.Exp(avg))
+		averageTrainingLoss := sumOfLosses / float64(len(trainingExamples))
+		averageValidationLoss := model.AverageLossOverExamples(validationExamples)
+		fmt.Printf("epoch %2d   train %.4f   val %.4f   val perplexity %.1f\n",
+			epochNumber, averageTrainingLoss, averageValidationLoss, math.Exp(float64(averageValidationLoss)))
 	}
 }
 
-// AverageLoss measures loss over all examples without changing the model.
-func (m *Model) AverageLoss(examples []Example) float32 {
-	var total float64
-	for _, ex := range examples {
-		total += float64(CrossEntropy(m.Forward(ex.Context[0], ex.Context[1]), ex.Target))
+// AverageLossOverExamples measures loss over all examples without changing the model.
+func (model *LanguageModel) AverageLossOverExamples(examples []TrainingExample) float32 {
+	var sumOfLosses float64
+	for _, example := range examples {
+		sumOfLosses += float64(ComputeCrossEntropyLoss(
+			model.PredictNextWordProbabilities(example.ContextWordIDs[0], example.ContextWordIDs[1]),
+			example.CorrectNextWordID))
 	}
-	return float32(total / float64(len(examples)))
+	return float32(sumOfLosses / float64(len(examples)))
 }
 
-// GradientCheck compares the analytic correction for two weights against a
-// numerical one. Run it after some training, when logits are large enough to
-// stand above float32 rounding noise.
-func GradientCheck(m *Model, ex Example, eps float32) {
-	c0, c1, target := ex.Context[0], ex.Context[1], ex.Target
-	p := m.Forward(c0, c1)
-	row0 := c0 * m.V
+// CheckGradientAgainstNumericalEstimate compares the analytic correction for two
+// weights against a numerical one. Run it after some training, when logits are
+// large enough to stand above float32 rounding noise.
+func CheckGradientAgainstNumericalEstimate(model *LanguageModel, example TrainingExample, tinyWeightChange float32) {
+	firstContextWordID := example.ContextWordIDs[0]
+	secondContextWordID := example.ContextWordIDs[1]
+	correctNextWordID := example.CorrectNextWordID
+	predictedProbabilities := model.PredictNextWordProbabilities(firstContextWordID, secondContextWordID)
+	firstContextWordWeightRowStart := firstContextWordID * model.VocabularySize
 
-	loss := func() float32 {
-		return CrossEntropy(m.Forward(c0, c1), target)
+	measureLoss := func() float32 {
+		return ComputeCrossEntropyLoss(
+			model.PredictNextWordProbabilities(firstContextWordID, secondContextWordID),
+			correctNextWordID)
 	}
 
-	for _, j := range []int{target, (target + 1) % m.V} {
-		analytic := p[j]
-		if j == target {
-			analytic -= 1
+	for _, candidateWordID := range []int{correctNextWordID, (correctNextWordID + 1) % model.VocabularySize} {
+		analyticCorrection := predictedProbabilities[candidateWordID]
+		if candidateWordID == correctNextWordID {
+			analyticCorrection -= 1
 		}
 
-		idx := row0 + j
-		old := m.W[idx]
-		m.W[idx] = old + eps
-		up := loss()
-		m.W[idx] = old - eps
-		down := loss()
-		m.W[idx] = old
+		weightIndex := firstContextWordWeightRowStart + candidateWordID
+		originalWeight := model.Weights[weightIndex]
+		model.Weights[weightIndex] = originalWeight + tinyWeightChange
+		lossAfterIncreasingWeight := measureLoss()
+		model.Weights[weightIndex] = originalWeight - tinyWeightChange
+		lossAfterDecreasingWeight := measureLoss()
+		model.Weights[weightIndex] = originalWeight
 
-		fmt.Printf("W[%d][%d]  analytic %+.6f   numeric %+.6f\n",
-			c0, j, analytic, (up-down)/(2*eps))
+		numericalCorrection := (lossAfterIncreasingWeight - lossAfterDecreasingWeight) / (2 * tinyWeightChange)
+		fmt.Printf("Weights[%d][%d]  analytic %+.6f   numeric %+.6f\n",
+			firstContextWordID, candidateWordID, analyticCorrection, numericalCorrection)
 	}
 }

@@ -32,3 +32,25 @@ Output file:   hamlet_tokens.txt (original file left untouched)
    - 31,502 tokens total, 7,556 unique.
 
 Source : https://www.gutenberg.org/cache/epub/1524/pg1524.txt
+
+
+6. Tokenization v2 (clean.go)
+   Source file:   hamlet_tokens.txt (the already cleaned file above)
+   Output file:   hamlet_clean_tokens.txt (regenerated on every run)
+
+   The v1 tokenizer split on whitespace only, so "KING," and "KING" and
+   "king" were three unrelated vocabulary entries. v2 fixes that:
+   - Lowercase everything.
+   - Normalize punctuation/encoding: ’ ‘ -> ', — – -> -, æ -> ae,
+     à -> a, "&c" -> "etc".
+   - Split punctuation into its own tokens; a token is either a word
+     ([a-z0-9]+, with apostrophes kept inside, so "don't" and
+     "polonius's" stay whole) or a single mark from . , ; : ! ? & " ( ) [ ] -
+   - Underscores are dropped, so leftover stage-direction markers such as
+     "_Hic" and "ubique?_" become plain words.
+   - Still: speaker names stay, lineation/verse breaks are lost to the
+     join, and punctuation remains part of the sequence.
+
+   Result: 39,318 tokens total, 4,755 unique (down from 7,556 unique).
+   Splitting punctuation raises the token count but many words are now
+   shared instead of fragmented, so each word gets more training examples.

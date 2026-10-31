@@ -249,3 +249,96 @@ Takeaway: the model has learnt *local* trigram statistics (it knows `KING.` and
 `HORATIO.` are speaker labels, that `THE TRAGEDY` comes before a name), but with
 only two words of context it cannot hold a sentence together. That is the
 limitation the next architecture has to solve.
+
+---
+
+# Tokenizer v2 (`clean.go`)
+
+The v1 tokenizer split on whitespace only, so `KING`, `KING,` and `king` were
+three unrelated vocabulary rows. `Retokenize` now lowercases everything, fixes
+curly quotes/dashes/`æ`/`à`, turns `&c` into `etc`, and splits punctuation into
+its own tokens (apostrophes stay inside words). Underscores are dropped, which
+also cleans up leftover stage-direction markers like `_Hic` and `ubique?_`.
+
+`main.go` regenerates `hamlet_clean_tokens.txt` from `hamlet_tokens.txt` on every
+run, so the raw file stays untouched.
+
+| | v1 | v2 |
+|---|---|---|
+| tokens | 31,502 | 39,318 |
+| unique words | 7,556 | 4,755 |
+
+Splitting punctuation raises the token count, but words are no longer
+fragmented by case or trailing punctuation, so each word is seen in more
+training examples.
+
+Retrained with the same settings (`lr = 0.1`, 10 epochs):
+
+| epoch | loss   | perplexity |
+|-------|--------|------------|
+| 0     | 8.4667 | 4755       |
+| 1     | 5.8744 | 355.8      |
+| 2     | 5.3212 | 204.6      |
+| 3     | 5.0918 | 162.7      |
+| 4     | 4.9159 | 136.4      |
+| 5     | 4.7663 | 117.5      |
+| 6     | 4.6333 | 102.9      |
+| 7     | 4.5120 | 91.1       |
+| 8     | 4.3997 | 81.4       |
+| 9     | 4.2945 | 73.3       |
+| 10    | 4.1952 | 66.4       |
+
+Loss after training: **4.0925** (v1 was 5.0416). Perplexity **~66** (v1 was
+~183). Gradient check still agrees to ~5 digits.
+
+Sample, temp 0.5:
+
+```
+the tragedy , which he is this ? hamlet . i am i will you not . i am i do not , to hamlet . i am my lord . hamlet . the king . how now , i do not
+```
+
+Better, but it still slips into loops (`i am i am`). That is the additive
+lookup model showing its ceiling: more context per word does not help it keep
+track of where the sentence has been.
+---
+
+# Train / validation split
+
+The last 10% of the token stream is held out for validation (35,384 train /
+3,930 val examples). The split is **contiguous**, not random: adjacent
+three-word windows overlap, so a random split would put near-identical windows
+on both sides and report a falsely low validation loss.
+
+`Train` now prints both losses every epoch, and `AverageLoss` is reused for
+validation (it never updates the model).
+
+| epoch | train  | val    | val perplexity |
+|-------|--------|--------|----------------|
+| 0     | 8.4667 | 8.4669 | 4755           |
+| 1     | 5.9201 | 5.5437 | 255.6          |
+| 2     | 5.3487 | 5.4413 | 230.7          |
+| 3     | 5.1137 | 5.3960 | 220.5          |
+| 4     | 4.9337 | 5.3709 | 215.1          |
+| 5     | 4.7805 | 5.3562 | 211.9          |
+| 6     | 4.6441 | 5.3477 | 210.1          |
+| 7     | 4.5196 | 5.3435 | 209.2          |
+| 8     | 4.4042 | 5.3424 | 209.0          |
+| 9     | 4.2962 | 5.3435 | 209.2          |
+| 10    | 4.1942 | 5.3464 | 209.8          |
+
+After training: train **4.0930**, val **5.3464**.
+
+## What this says
+
+Train loss keeps dropping while validation loss flattens at ~5.34 and then
+starts rising after epoch 8. That is textbook **overfitting**: past that point
+the model is getting better at the training examples, not at the language. The
+~45M-parameter table for 35k examples has plenty of room to memorize.
+
+The honest headline number is therefore **val 5.35 / perplexity ~210**, not the
+train 4.09. That also means the earlier "perplexity 66" result was optimistic —
+it was measured on data the model had already seen.
+
+To go below the validation floor with this architecture you would need
+regularization or a smaller table; to go meaningfully lower you would need a
+different model.

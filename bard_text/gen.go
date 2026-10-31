@@ -5,44 +5,48 @@ import (
 	"strings"
 )
 
-// Sample picks the next word from the model's scores, with temperature.
-// 1.0 is the trained distribution; below 1 is safer, above 1 is wilder.
-func (m *Model) Sample(c0, c1 int, temperature float32, rng *rand.Rand) int {
-	z := m.Logits(c0, c1)
+// SampleNextWordID draws one word ID from the model's predicted distribution.
+// A temperature below 1 is safer, above 1 is wilder.
+func (model *LanguageModel) SampleNextWordID(firstContextWordID, secondContextWordID int, temperature float32, randomSource *rand.Rand) int {
+	logits := model.ComputeLogitsForEveryWord(firstContextWordID, secondContextWordID)
 	if temperature != 1 {
-		for j := range z {
-			z[j] /= temperature
+		for candidateWordID := range logits {
+			logits[candidateWordID] /= temperature
 		}
 	}
-	p := Softmax(z)
+	probabilities := ConvertLogitsToProbabilities(logits)
 
-	r := rng.Float32()
-	var acc float32
-	for j, pj := range p {
-		acc += pj
-		if r < acc {
-			return j
+	randomNumber := randomSource.Float32()
+	var cumulativeProbability float32
+	for candidateWordID, probability := range probabilities {
+		cumulativeProbability += probability
+		if randomNumber < cumulativeProbability {
+			return candidateWordID
 		}
 	}
-	return len(p) - 1
+	return len(probabilities) - 1
 }
 
-// Generate continues a two-word start for n more words.
-func Generate(m *Model, tk *Tokenizer, start [2]int, n int, temperature float32, seed int64) string {
-	rng := rand.New(rand.NewSource(seed))
-	ids := []int{start[0], start[1]}
-	for i := 0; i < n; i++ {
-		next := m.Sample(ids[len(ids)-2], ids[len(ids)-1], temperature, rng)
-		ids = append(ids, next)
+// GenerateTextFromStartWords continues for a number of words from a two-word start.
+func GenerateTextFromStartWords(model *LanguageModel, vocabulary *Vocabulary, startWordIDs [2]int, howManyWordsToGenerate int, temperature float32, randomSeed int64) string {
+	randomSource := rand.New(rand.NewSource(randomSeed))
+	generatedWordIDs := []int{startWordIDs[0], startWordIDs[1]}
+	for wordIndex := 0; wordIndex < howManyWordsToGenerate; wordIndex++ {
+		nextWordID := model.SampleNextWordID(
+			generatedWordIDs[len(generatedWordIDs)-2],
+			generatedWordIDs[len(generatedWordIDs)-1],
+			temperature,
+			randomSource)
+		generatedWordIDs = append(generatedWordIDs, nextWordID)
 	}
 
-	var b strings.Builder
-	for i, id := range ids {
-		if i > 0 {
-			b.WriteByte(' ')
+	var textBuilder strings.Builder
+	for wordIndex, wordID := range generatedWordIDs {
+		if wordIndex > 0 {
+			textBuilder.WriteByte(' ')
 		}
-		s, _ := tk.Decode(id)
-		b.WriteString(s)
+		word, _ := vocabulary.IDToToken(wordID)
+		textBuilder.WriteString(word)
 	}
-	return b.String()
+	return textBuilder.String()
 }

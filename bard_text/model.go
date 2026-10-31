@@ -5,92 +5,67 @@ import (
 	"math/rand"
 )
 
-// holds learnable params of logistic regression
-type Model struct {
-	V    int       // vocab size
-	W    []float32 // rows are input features, columns are candidates
-	Bias []float32 // one bias per candidate word , so V values in total
+// LanguageModel holds every learnable number in the model.
+type LanguageModel struct {
+	VocabularySize int       // how many distinct words the model can predict
+	Weights        []float32 // two blocks of rows; columns are candidate words
+	Biases         []float32 // one baseline score per candidate word
 }
 
-// model with small random weights and zero biases
-func NewModel(vocabSize int, seed int64) *Model {
-	rng := rand.New(rand.NewSource(seed))
+// NewLanguageModel builds a model with small random weights and zero biases.
+func NewLanguageModel(vocabularySize int, randomSeed int64) *LanguageModel {
+	randomSource := rand.New(rand.NewSource(randomSeed))
 
-	m := &Model{
-		V:    vocabSize,
-		W:    make([]float32, 2*vocabSize*vocabSize), // 2V rows of V columns, all zero to start
-		Bias: make([]float32, vocabSize),             // One zero bias per candidate
+	model := &LanguageModel{
+		VocabularySize: vocabularySize,
+		Weights:        make([]float32, 2*vocabularySize*vocabularySize),
+		Biases:         make([]float32, vocabularySize),
 	}
 
-	for i := range m.W {
-		// visit every weight
-		m.W[i] = float32(rng.NormFloat64() * 0.01) // small random value near zero
+	for weightIndex := range model.Weights {
+		model.Weights[weightIndex] = float32(randomSource.NormFloat64() * 0.01)
 	}
-	return m // return a pointer to new model
+	return model
 }
 
-// calculates a score for each possible next word based on the two context words
-func (m *Model) Logits(c0, c1 int) []float32 {
-	// create a slice to store one score for each word in the vocabulary
-	z := make([]float32, m.V) // slice to score one score for each word in the vocabulary
+// ComputeLogitsForEveryWord returns one raw score per candidate next word.
+func (model *LanguageModel) ComputeLogitsForEveryWord(firstContextWordID, secondContextWordID int) []float32 {
+	logits := make([]float32, model.VocabularySize)
 
-	row0 := c0 * m.V
-	row1 := (m.V + c1) * m.V
-	// m.W is a flat array treated as a table with m.V columns per row.
-	// To find a row's starting index, multiply its row number by m.V.
-	// The first context word uses row c0, while the second uses row m.V + c1
-	// because its rows come after the first m.V rows.
+	firstContextWordWeightRowStart := firstContextWordID * model.VocabularySize
+	secondContextWordWeightRowStart := (model.VocabularySize + secondContextWordID) * model.VocabularySize
 
-	// calculate a score for every possible next word
-	for j := 0; j < m.V; j++ {
-		// start with this word's bias then add its weights for btoh context words
-		z[j] = m.Bias[j] + m.W[row0+j] + m.W[row1+j]
+	for candidateWordID := 0; candidateWordID < model.VocabularySize; candidateWordID++ {
+		logits[candidateWordID] = model.Biases[candidateWordID] +
+			model.Weights[firstContextWordWeightRowStart+candidateWordID] +
+			model.Weights[secondContextWordWeightRowStart+candidateWordID]
 	}
-	// Loop through every word in the vocabulary and calculate its score.
-	// For each word, add its bias to the weights from both context words.
-	// row0 and row1 point to the start of their respective rows in the
-	// flattened weight array, while j selects the column for the current word.
-	// Store each score in z, which holds one score per possible next word.
-	return z // return score for all possible next words
+	return logits
 }
 
-// The softmax function is a mathematical operation that converts a vector of raw, unconstrained numbers (called logits) into a clean probability distribution that sums up to 1
-
-// The function finds the largest score, subtracts it from every score for numerical stability, and applies the exponential function to each result. It adds up those exponential values, divides each one by the total, and returns the resulting probabilities
-func Softmax(z []float32) []float32 {
-	// largest score in input slice
-	maxZ := z[0]
-	for _, v := range z[1:] {
-		if v > maxZ {
-			maxZ = v
+// ConvertLogitsToProbabilities turns raw scores into a distribution summing to 1.
+func ConvertLogitsToProbabilities(logits []float32) []float32 {
+	largestLogit := logits[0]
+	for _, logit := range logits[1:] {
+		if logit > largestLogit {
+			largestLogit = logit
 		}
 	}
-	// one output slot for each input score
-	p := make([]float32, len(z))
 
-	// keep track of total of all exponential values
-	var sum float32
-
-	// convert each score into an exponential value
-	// subctracting the largest score helps prevent overlfow
-	for j, v := range z {
-		e := float32(math.Exp(float64(v - maxZ)))
-
-		// store value temporarily and add it to total
-		p[j] = e
-		sum += e
+	probabilities := make([]float32, len(logits))
+	var sumOfExponentials float32
+	for candidateWordID, logit := range logits {
+		exponential := float32(math.Exp(float64(logit - largestLogit)))
+		probabilities[candidateWordID] = exponential
+		sumOfExponentials += exponential
 	}
-	// divide each value by total to get probabilities
-	for j := range p {
-		p[j] /= sum
+	for candidateWordID := range probabilities {
+		probabilities[candidateWordID] /= sumOfExponentials
 	}
-	// return one probability for each input score
-	return p
+	return probabilities
 }
 
-// Forward takes two context words and returns a probability for every possible next word.
-func (m *Model) Forward(c0, c1 int) []float32 {
-	// First calculate a score for each candidate word,
-	// then convert those scores into probabilities.
-	return Softmax(m.Logits(c0, c1))
+// PredictNextWordProbabilities returns a probability for every candidate word.
+func (model *LanguageModel) PredictNextWordProbabilities(firstContextWordID, secondContextWordID int) []float32 {
+	return ConvertLogitsToProbabilities(model.ComputeLogitsForEveryWord(firstContextWordID, secondContextWordID))
 }

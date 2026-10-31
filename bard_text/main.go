@@ -5,74 +5,92 @@ import (
 	"log"
 )
 
-func main() {
-	tk, err := LoadFile("hamlet_tokens.txt")
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Println("occurences: ", tk.Occurences())
-	fmt.Println("Vocabulary size:", tk.Size())
+const (
+	rawTokenFilePath     = "hamlet_tokens.txt"
+	cleanedTokenFilePath = "hamlet_clean_tokens.txt"
+)
 
-	for id := 0; id < tk.Size(); id++ {
-		tok, ok := tk.Decode(id) // id to token
-		if !ok {
-			log.Fatalf("decode failed for id %d", id)
-		}
-		back, ok := tk.Encode(tok) // token to id
-		if !ok || back != id {
-			log.Fatalf("round trip failed for id %d (%q)", id, tok)
-		}
+func main() {
+	// Lowercase and split punctuation off words, then load the result.
+	if _, err := RewriteTokenFileWithCleanedTokens(rawTokenFilePath, cleanedTokenFilePath); err != nil {
+		log.Fatal(err)
 	}
-	ids, err := EncodeFile("hamlet_tokens.txt", tk)
+	vocabulary, err := LoadVocabularyFromFile(cleanedTokenFilePath)
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println("Encoded length:", len(ids)) // Should be 31502.
-	fmt.Println("First 10 IDs:", ids[:10])
+	fmt.Println("total tokens: ", vocabulary.TotalTokenCount())
+	fmt.Println("Vocabulary size:", vocabulary.VocabularySize())
+
+	for wordID := 0; wordID < vocabulary.VocabularySize(); wordID++ {
+		token, exists := vocabulary.IDToToken(wordID) // ID to token
+		if !exists {
+			log.Fatalf("decode failed for id %d", wordID)
+		}
+		roundTripID, exists := vocabulary.TokenToID(token) // token to ID
+		if !exists || roundTripID != wordID {
+			log.Fatalf("round trip failed for id %d (%q)", wordID, token)
+		}
+	}
+	tokenIDs, err := ReadTokenFileAsIDs(cleanedTokenFilePath, vocabulary)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("Encoded length:", len(tokenIDs))
+	fmt.Println("First 10 IDs:", tokenIDs[:10])
 	fmt.Println("ok")
 
-	examples := BuildExamples(ids)
-	fmt.Println("Examples:", len(examples)) // Should be 31500.
+	// Hold out the last 10% of the play for validation. The split is
+	// contiguous, not random, so nearby sliding windows cannot leak
+	// across the boundary.
+	tokenSplitIndex := len(tokenIDs) * 9 / 10
+	trainingExamples := BuildTrainingExamples(tokenIDs[:tokenSplitIndex])
+	validationExamples := BuildTrainingExamples(tokenIDs[tokenSplitIndex:])
+	fmt.Println("Train examples:", len(trainingExamples))
+	fmt.Println("Val examples:  ", len(validationExamples))
 
-	// Confirm every ID is in range, since the largest should be 7555.
-	maxID := 0
-	for _, id := range ids {
-		if id > maxID {
-			maxID = id
+	// Confirm every ID is in range, since the largest should be vocabulary size minus one.
+	largestWordID := 0
+	for _, wordID := range tokenIDs {
+		if wordID > largestWordID {
+			largestWordID = wordID
 		}
 	}
-	fmt.Println("Max ID:", maxID) // Should be 7555.
+	fmt.Println("Max ID:", largestWordID)
 
 	// Print the first few examples as words to check alignment.
-	PrintExamples(tk, examples, 5)
+	PrintTrainingExamplesAsWords(vocabulary, trainingExamples, 5)
 
 	fmt.Println("-------------------------------")
 	// Create a model with one weight per feature-candidate pair and a fixed seed.
-	m := NewModel(tk.Size(), 42)
+	model := NewLanguageModel(vocabulary.VocabularySize(), 42)
 
-	// Predict the word after the first training example's context, "THE" "TRAGEDY".
-	probs := m.Forward(examples[0].Context[0], examples[0].Context[1])
+	// Predict the word after the first training example's context.
+	nextWordProbabilities := model.PredictNextWordProbabilities(
+		trainingExamples[0].ContextWordIDs[0],
+		trainingExamples[0].ContextWordIDs[1])
 
 	// The probabilities should add up to about 1.
-	var total float32
-	for _, p := range probs { // Add up every probability.
-		total += p
+	var totalProbability float32
+	for _, probability := range nextWordProbabilities {
+		totalProbability += probability
 	}
-	fmt.Println("Sum of probabilities:", total) // Should print a value very close to 1.
+	fmt.Println("Sum of probabilities:", totalProbability) // Should print a value very close to 1.
 
-	// Show how much probability the untrained model gives to the correct answer, "OF".
-	fmt.Println("P(correct):", probs[examples[0].Target]) // Around 1/7556 ≈ 0.00013, since weights are random.
+	// Show how much probability the untrained model gives to the correct answer.
+	fmt.Println("P(correct):", nextWordProbabilities[trainingExamples[0].CorrectNextWordID]) // Around 1/V, since weights are random.
 
 	fmt.Println("-------------------------------")
-	fmt.Printf("loss before training: %.4f\n", m.AverageLoss(examples))
-	m.Train(examples, 10, 0.1)
-	fmt.Printf("loss after training:  %.4f\n", m.AverageLoss(examples))
+	fmt.Printf("loss before training: train %.4f   val %.4f\n",
+		model.AverageLossOverExamples(trainingExamples),
+		model.AverageLossOverExamples(validationExamples))
+	model.TrainModelForEpochs(trainingExamples, validationExamples, 10, 0.1)
+	fmt.Printf("loss after training:  train %.4f   val %.4f\n",
+		model.AverageLossOverExamples(trainingExamples),
+		model.AverageLossOverExamples(validationExamples))
 
-	GradientCheck(m, examples[0], 1e-2)
+	CheckGradientAgainstNumericalEstimate(model, trainingExamples[0], 1e-2)
 
 	fmt.Println("-------------------------------")
-	start := [2]int{examples[0].Context[0], examples[0].Context[1]}
-	for _, temp := range []float32{0.5, 1.0, 1.5} {
-		fmt.Printf("temperature %.1f:\n%s\n\n", temp, Generate(m, tk, start, 40, temp, 1))
-	}
+	RunCommandLineChat(model, vocabulary)
 }

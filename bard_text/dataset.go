@@ -2,37 +2,39 @@ package main
 
 import "fmt"
 
-type Example struct {
-	// one trainign case : two context ids and id that should come next
-	Context [2]int // two prev tokens
-	Target  int    // id of word taht actually forllows them
+// TrainingExample is one training case: two context word IDs and the ID of the
+// word that actually came next.
+type TrainingExample struct {
+	ContextWordIDs    [2]int // the two previous tokens
+	CorrectNextWordID int    // the token that actually follows them
 }
 
-// slides a window of three IDs across sequence
-// each window has one examp,e , first two ids are context and third is target
-func BuildExamples(ids []int) []Example {
-	if len(ids) < 3 {
+// BuildTrainingExamples slides a three-word window over the token IDs.
+// Each window is one example: the first two IDs are context, the third is target.
+func BuildTrainingExamples(tokenIDs []int) []TrainingExample {
+	if len(tokenIDs) < 3 {
 		return nil
 	}
-	examples := make([]Example, 0, len(ids)-2)
-	for i := 0; i+2 < len(ids); i++ {
-		ex := Example{
-			Context: [2]int{ids[i], ids[i+1]},
-			Target:  ids[i+2],
+	trainingExamples := make([]TrainingExample, 0, len(tokenIDs)-2)
+	for windowStartIndex := 0; windowStartIndex+2 < len(tokenIDs); windowStartIndex++ {
+		example := TrainingExample{
+			ContextWordIDs:    [2]int{tokenIDs[windowStartIndex], tokenIDs[windowStartIndex+1]},
+			CorrectNextWordID: tokenIDs[windowStartIndex+2],
 		}
-		examples = append(examples, ex) // add example to result
+		trainingExamples = append(trainingExamples, example)
 	}
-	return examples
+	return trainingExamples
 }
 
-func PrintExamples(tk *Tokenizer, examples []Example, n int) {
-	if n > len(examples) {
-		n = len(examples)
+// PrintTrainingExamplesAsWords prints examples so alignment can be checked by eye.
+func PrintTrainingExamplesAsWords(vocabulary *Vocabulary, trainingExamples []TrainingExample, howManyToPrint int) {
+	if howManyToPrint > len(trainingExamples) {
+		howManyToPrint = len(trainingExamples)
 	}
-	for _, ex := range examples[:n] {
-		a, _ := tk.Decode(ex.Context[0])
-		b, _ := tk.Decode(ex.Context[1])
-		c, _ := tk.Decode(ex.Target)
-		fmt.Printf("%q %q -> %q\n", a, b, c)
+	for _, example := range trainingExamples[:howManyToPrint] {
+		firstContextWord, _ := vocabulary.IDToToken(example.ContextWordIDs[0])
+		secondContextWord, _ := vocabulary.IDToToken(example.ContextWordIDs[1])
+		correctNextWord, _ := vocabulary.IDToToken(example.CorrectNextWordID)
+		fmt.Printf("%q %q -> %q\n", firstContextWord, secondContextWord, correctNextWord)
 	}
 }
